@@ -4,12 +4,14 @@
 #include <regex>
 #include <fstream>
 #include <string>
+#include <random>
 #include <spdlog/spdlog.h>
 #include <spdlog/fmt/ostr.h>
 #include <tclap/CmdLine.h>
 #include <hepnos.hpp>
 #include "hepnos-nova-classes/_all_.hpp"
 #include "hepnos-nova-classes/_macro_.hpp"
+#include "DummyProduct.hpp"
 
 static int                       g_size;
 static int                       g_rank;
@@ -22,13 +24,18 @@ static std::vector<std::string>  g_product_names;
 static std::pair<double,double>  g_wait_range;
 static std::unordered_map<
         std::string,
-        std::function<void()>>   g_load_product_fn;
+        std::function<void(const hepnos::Event&)>>
+                                 g_load_product_fn;
+static std::mt19937              g_mte;
 
 static void parse_arguments(int argc, char** argv);
 static std::pair<double,double> parse_wait_range(const std::string&);
 static std::string check_file_exists(const std::string& filename);
 static void prepare_product_loading_functions();
+static void simulate_processing();
 static void run_benchmark();
+template<typename Ostream>
+static Ostream& operator<<(Ostream& os, const hepnos::ParallelEventProcessorStatistics& stats);
 
 int main(int argc, char** argv) {
 
@@ -45,14 +52,17 @@ int main(int argc, char** argv) {
 
     spdlog::set_level(g_logging_level);
 
-    spdlog::debug("connection file: {}", g_connection_file);
-    spdlog::debug("input dataset: {}", g_input_dataset);
-    spdlog::debug("product label: {}", g_product_label);
-    spdlog::debug("num threads: {}", g_num_threads);
-    spdlog::debug("product names: {}", g_product_names.size());
-    spdlog::debug("wait range: {},{}", g_wait_range.first, g_wait_range.second);
+    spdlog::trace("connection file: {}", g_connection_file);
+    spdlog::trace("input dataset: {}", g_input_dataset);
+    spdlog::trace("product label: {}", g_product_label);
+    spdlog::trace("num threads: {}", g_num_threads);
+    spdlog::trace("product names: {}", g_product_names.size());
+    spdlog::trace("wait range: {},{}", g_wait_range.first, g_wait_range.second);
 
     prepare_product_loading_functions();
+
+    spdlog::trace("Initializing RNG");
+    g_mte = std::mt19937(g_rank);
 
     run_benchmark();
 
@@ -131,11 +141,18 @@ static std::pair<double,double> parse_wait_range(const std::string& s) {
             exit(-1);
         }
     }
+    if(range.second < range.first) {
+        spdlog::critical("Invalid wait range expression {} ({} < {})",
+                         s, range.second, range.first);
+        MPI_Abort(MPI_COMM_WORLD, -1);
+        exit(-1);
+    }
 
     return range;
 }
 
 static std::string check_file_exists(const std::string& filename) {
+    spdlog::trace("Checking if file {} exists", filename);
     std::ifstream ifs(filename);
     if(ifs.good()) return filename;
     else {
@@ -147,25 +164,90 @@ static std::string check_file_exists(const std::string& filename) {
 }
 
 static void prepare_product_loading_functions() {
-    spdlog::debug("Preparing functions for loading producs");
+    spdlog::trace("Preparing functions for loading producs");
 #define X(__class__) \
-    g_load_product_fn[#__class__] = []() { \
+    g_load_product_fn[#__class__] = [](const hepnos::Event& ev) { \
         __class__ product; \
+        ev.load(g_product_label, product); \
     };
 
+    X(dummy_product)
     HEPNOS_FOREACH_NOVA_CLASS
 #undef X
-    spdlog::debug("Created functions for {} product types", g_load_product_fn.size());
+    spdlog::trace("Created functions for {} product types", g_load_product_fn.size());
+}
+
+static void simulate_processing() {
+    double t_start = MPI_Wtime();
+    double t_wait;
+    if(g_wait_range.first == g_wait_range.second) {
+        t_wait = g_wait_range.first;
+    } else {
+        std::uniform_real_distribution<double> dist(
+            g_wait_range.first, g_wait_range.second);
+        t_wait = dist(g_mte);
+    }
+    double t_now;
+    do {
+        t_now = MPI_Wtime();
+    } while(t_now - t_start < t_wait);
 }
 
 static void run_benchmark() {
-    // Initialize HEPnOS
+
     hepnos::DataStore datastore;
     try {
-        spdlog::info("Connecting to HEPnOS using file {}", g_connection_file);
+        spdlog::trace("Connecting to HEPnOS using file {}", g_connection_file);
         datastore = hepnos::DataStore::connect(g_connection_file);
     } catch(const hepnos::Exception& ex) {
         spdlog::critical("Could not connect to HEPnOS service: {}", ex.what());
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
+
+    spdlog::trace("Creating AsyncEngine with {} threads", g_num_threads);
+    hepnos::AsyncEngine async(datastore, g_num_threads);
+
+    spdlog::trace("Creating ParallelEventProcessor");
+    hepnos::ParallelEventProcessor pep(async, MPI_COMM_WORLD);
+
+    spdlog::trace("Loading dataset");
+    hepnos::DataSet dataset;
+    try {
+        dataset = datastore.root()[g_input_dataset];
+    } catch(...) {}
+    if(!dataset.valid() && g_rank == 0) {
+        spdlog::critical("Invalid dataset {}", g_input_dataset);
+        MPI_Abort(MPI_COMM_WORLD, -1);
+        exit(-1);
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    spdlog::trace("Calling processing function on dataset {}", g_input_dataset);
+
+    hepnos::ParallelEventProcessorStatistics stats;
+    double t_start = MPI_Wtime();
+    pep.process(dataset, [](const hepnos::Event& ev) {
+        auto subrun = ev.subrun();
+        auto run = subrun.run();
+        spdlog::trace("Processing event {} from subrun {} from run {}",
+                      ev.number(), subrun.number(), run.number());
+        simulate_processing();
+    }, &stats);
+    double t_end = MPI_Wtime();
+
+    spdlog::info("Benchmark completed in {} seconds", t_start-t_end);
+    spdlog::info("Statistics: {}", stats);
+}
+
+template<typename Ostream>
+static Ostream& operator<<(Ostream& os, const hepnos::ParallelEventProcessorStatistics& stats) {
+    os << "{ \"total_events_processed\" : " << stats.total_events_processed << ","
+       << " \"local_events_processed\" : " << stats.local_events_processed << ","
+       << " \"total_time\" : " << stats.total_time << ","
+       << " \"acc_event_processing_time\" : " << stats.acc_event_processing_time << ","
+       << " \"acc_product_loading_time\" : " << stats.acc_product_loading_time << ","
+       << " \"processing_time_stats\" : " << stats.processing_time_stats << ","
+       << " \"product_loading_time_stats\" : " << stats.product_loading_time_stats << ","
+       << " \"waiting_time_stats\" : " << stats.waiting_time_stats << "}";
+    return os;
 }
