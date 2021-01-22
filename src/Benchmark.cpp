@@ -34,7 +34,6 @@ static void parse_arguments(int argc, char** argv);
 static std::pair<double,double> parse_wait_range(const std::string&);
 static std::string check_file_exists(const std::string& filename);
 static void prepare_product_loading_functions();
-static void simulate_processing();
 static void run_benchmark();
 template<typename Ostream>
 static Ostream& operator<<(Ostream& os, const hepnos::ParallelEventProcessorStatistics& stats);
@@ -62,6 +61,17 @@ int main(int argc, char** argv) {
     spdlog::trace("wait range: {},{}", g_wait_range.first, g_wait_range.second);
 
     prepare_product_loading_functions();
+
+    if(g_rank == 0) {
+        for(auto& p : g_product_names) {
+            if(g_load_product_fn.count(p) == 0) {
+                spdlog::critical("Unknown product name {}", p);
+                MPI_Abort(MPI_COMM_WORLD, -1);
+                exit(-1);
+            }
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
 
     spdlog::trace("Initializing RNG");
     g_mte = std::mt19937(g_rank);
@@ -192,7 +202,16 @@ static void prepare_product_loading_functions() {
     spdlog::trace("Created functions for {} product types", g_load_product_fn.size());
 }
 
-static void simulate_processing() {
+static void simulate_processing(const hepnos::Event& ev) {
+    spdlog::trace("Loading products");
+    try {
+        for(auto& p : g_product_names) {
+            g_load_product_fn[p](ev);
+        }
+    } catch(const hepnos::Exception& ex) {
+        spdlog::critical(ex.what());
+    }
+    spdlog::trace("Simulating processing");
     double t_start = MPI_Wtime();
     double t_wait;
     if(g_wait_range.first == g_wait_range.second) {
@@ -240,18 +259,22 @@ static void run_benchmark() {
     spdlog::trace("Calling processing function on dataset {}", g_input_dataset);
 
     hepnos::ParallelEventProcessorStatistics stats;
+    MPI_Barrier(MPI_COMM_WORLD);
     double t_start = MPI_Wtime();
     pep.process(dataset, [](const hepnos::Event& ev) {
         auto subrun = ev.subrun();
         auto run = subrun.run();
         spdlog::trace("Processing event {} from subrun {} from run {}",
                       ev.number(), subrun.number(), run.number());
-        simulate_processing();
+        simulate_processing(ev);
     }, &stats);
+    MPI_Barrier(MPI_COMM_WORLD);
     double t_end = MPI_Wtime();
 
-    spdlog::info("Benchmark completed in {} seconds", t_start-t_end);
     spdlog::info("Statistics: {}", stats);
+    MPI_Barrier(MPI_COMM_WORLD);
+    if(g_rank == 0)
+        spdlog::info("Benchmark completed in {} seconds", t_end-t_start);
 }
 
 template<typename Ostream>

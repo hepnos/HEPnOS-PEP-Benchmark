@@ -57,6 +57,17 @@ int main(int argc, char** argv) {
 
     prepare_product_storing_functions();
 
+    if(g_rank == 0) {
+        for(auto& p : g_product_names) {
+            if(g_store_product_fn.count(p) == 0) {
+                spdlog::critical("Unknown product name {}", p);
+                MPI_Abort(MPI_COMM_WORLD, -1);
+                exit(-1);
+            }
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
     spdlog::trace("Initializing RNG");
     g_mte = std::mt19937(g_rank);
 
@@ -142,7 +153,9 @@ static void prepare_product_storing_functions() {
 #define X(__class__) \
     g_store_product_fn[#__class__] = [](hepnos::Event& ev) { \
         __class__ product; \
-        ev.store(g_product_label, product); \
+        spdlog::trace("Storing product of type " #__class__); \
+        bool b = ev.store(g_product_label, product); \
+        if(!b) spdlog::warn("Failed to store product of type " #__class__); \
     };
 
     HEPNOS_FOREACH_NOVA_CLASS
@@ -150,7 +163,9 @@ static void prepare_product_storing_functions() {
     g_store_product_fn["dummy_product"] = [](hepnos::Event& ev) {
         dummy_product product;
         product.data.resize(g_dummy_payload);
-        ev.store(g_product_label, product);
+        spdlog::trace("Storing product of type dummy_product");
+        bool b = ev.store(g_product_label, product);
+        if(!b) spdlog::warn("Failed to store product of type dummy_product");
     };
     spdlog::trace("Created functions for {} product types", g_store_product_fn.size());
 }

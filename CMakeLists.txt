@@ -33,9 +33,14 @@ set(libraries ${libraries} Boost::serialization)
 find_package(hepnos REQUIRED)
 set(libraries ${libraries} hepnos)
 
-# Executable
+# Executables
 add_executable(hepnos-pep-benchmark src/Benchmark.cpp)
 target_link_libraries(hepnos-pep-benchmark ${libraries})
 
+add_executable(hepnos-gen-data src/DummyEventGenerator.cpp)
+target_link_libraries(hepnos-gen-data ${libraries})
+
 install(TARGETS hepnos-pep-benchmark
+        DESTINATION bin)
+install(TARGETS hepnos-gen-data
         DESTINATION bin)
