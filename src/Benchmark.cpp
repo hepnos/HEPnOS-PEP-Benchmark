@@ -27,6 +27,8 @@ static std::unordered_map<
         std::function<void(const hepnos::Event&)>>
                                  g_load_product_fn;
 static std::mt19937              g_mte;
+static hepnos::ParallelEventProcessorOptions
+                                 g_pep_options;
 
 static void parse_arguments(int argc, char** argv);
 static std::pair<double,double> parse_wait_range(const std::string&);
@@ -93,6 +95,13 @@ static void parse_arguments(int argc, char** argv) {
             "Name of the products to load", false, "string");
         TCLAP::ValueArg<std::string> waitRange("r", "wait-range",
             "Waiting time interval in seconds (e.g. 1.34,3.56)", false, "0,0", "x,y");
+        TCLAP::ValueArg<unsigned> inputBatchSize("i", "input-batch-size",
+            "Input batch size for parallel event processor", false, 16, "int");
+        TCLAP::ValueArg<unsigned> outputBatchSize("o", "output-batch-size",
+            "Output batch size for parallel event processor", false, 16, "int");
+        TCLAP::ValueArg<unsigned> cacheSize("s", "cache-size",
+            "Prefetcher cache size for parallel event processor", false,
+            std::numeric_limits<unsigned>::max(), "int");
 
         cmd.add(clientFile);
         cmd.add(dataSetName);
@@ -101,16 +110,22 @@ static void parse_arguments(int argc, char** argv) {
         cmd.add(numThreads);
         cmd.add(productNames);
         cmd.add(waitRange);
+        cmd.add(inputBatchSize);
+        cmd.add(outputBatchSize);
+        cmd.add(cacheSize);
 
         cmd.parse(argc, argv);
 
-        g_connection_file = check_file_exists(clientFile.getValue());
-        g_input_dataset   = dataSetName.getValue();
-        g_product_label   = productLabel.getValue();
-        g_logging_level   = spdlog::level::from_str(loggingLevel.getValue());
-        g_num_threads     = numThreads.getValue();
-        g_product_names   = productNames.getValue();
-        g_wait_range      = parse_wait_range(waitRange.getValue());
+        g_connection_file   = check_file_exists(clientFile.getValue());
+        g_input_dataset     = dataSetName.getValue();
+        g_product_label     = productLabel.getValue();
+        g_logging_level     = spdlog::level::from_str(loggingLevel.getValue());
+        g_num_threads       = numThreads.getValue();
+        g_product_names     = productNames.getValue();
+        g_wait_range        = parse_wait_range(waitRange.getValue());
+        g_pep_options.inputBatchSize  = inputBatchSize.getValue();
+        g_pep_options.outputBatchSize = outputBatchSize.getValue();
+        g_pep_options.cacheSize       = cacheSize.getValue();
 
     } catch(TCLAP::ArgException &e) {
         if(g_rank == 0) {
@@ -208,7 +223,7 @@ static void run_benchmark() {
     hepnos::AsyncEngine async(datastore, g_num_threads);
 
     spdlog::trace("Creating ParallelEventProcessor");
-    hepnos::ParallelEventProcessor pep(async, MPI_COMM_WORLD);
+    hepnos::ParallelEventProcessor pep(async, MPI_COMM_WORLD, g_pep_options);
 
     spdlog::trace("Loading dataset");
     hepnos::DataSet dataset;
