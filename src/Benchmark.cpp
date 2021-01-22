@@ -20,10 +20,14 @@ static spdlog::level::level_enum g_logging_level;
 static unsigned                  g_num_threads;
 static std::vector<std::string>  g_product_names;
 static std::pair<double,double>  g_wait_range;
+static std::unordered_map<
+        std::string,
+        std::function<void()>>   g_load_product_fn;
 
 static void parse_arguments(int argc, char** argv);
 static std::pair<double,double> parse_wait_range(const std::string&);
 static std::string check_file_exists(const std::string& filename);
+static void prepare_product_loading_functions();
 static void run_benchmark();
 
 int main(int argc, char** argv) {
@@ -47,6 +51,8 @@ int main(int argc, char** argv) {
     spdlog::debug("num threads: {}", g_num_threads);
     spdlog::debug("product names: {}", g_product_names.size());
     spdlog::debug("wait range: {},{}", g_wait_range.first, g_wait_range.second);
+
+    prepare_product_loading_functions();
 
     run_benchmark();
 
@@ -138,6 +144,18 @@ static std::string check_file_exists(const std::string& filename) {
         exit(-1);
     }
     return "";
+}
+
+static void prepare_product_loading_functions() {
+    spdlog::debug("Preparing functions for loading producs");
+#define X(__class__) \
+    g_load_product_fn[#__class__] = []() { \
+        __class__ product; \
+    };
+
+    HEPNOS_FOREACH_NOVA_CLASS
+#undef X
+    spdlog::debug("Created functions for {} product types", g_load_product_fn.size());
 }
 
 static void run_benchmark() {
