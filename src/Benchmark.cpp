@@ -193,6 +193,7 @@ static void prepare_product_loading_functions() {
 #define X(__class__) \
     g_load_product_fn[#__class__] = [](const hepnos::Event& ev) { \
         __class__ product; \
+        spdlog::trace("Loading product of type " #__class__); \
         ev.load(g_product_label, product); \
     };
 
