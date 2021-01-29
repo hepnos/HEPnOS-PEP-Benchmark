@@ -2,9 +2,12 @@
 #define __DUMMY_PRODUCT_H
 
 #include <vector>
+#include <boost/serialization/vector.hpp>
+#include <string>
+#include <boost/serialization/string.hpp>
 
 struct dummy_product {
-    std::vector<char> data;
+    std::string data;
 
     template<typename A>
     void serialize(A& ar, const unsigned int version) {
