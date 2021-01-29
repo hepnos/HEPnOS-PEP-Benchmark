@@ -40,7 +40,8 @@ static Ostream& operator<<(Ostream& os, const hepnos::ParallelEventProcessorStat
 
 int main(int argc, char** argv) {
 
-    MPI_Init(&argc, &argv);
+    int provided, required = MPI_THREAD_MULTIPLE;
+    MPI_Init_thread(&argc, &argv, required, &provided);
     MPI_Comm_size(MPI_COMM_WORLD, &g_size);
     MPI_Comm_rank(MPI_COMM_WORLD, &g_rank);
 
@@ -52,6 +53,10 @@ int main(int argc, char** argv) {
     parse_arguments(argc, argv);
 
     spdlog::set_level(g_logging_level);
+
+    if(provided != required && g_rank == 0) {
+        spdlog::warn("MPI doesn't provider MPI_THREAD_MULTIPLE");
+    }
 
     spdlog::trace("connection file: {}", g_connection_file);
     spdlog::trace("input dataset: {}", g_input_dataset);
