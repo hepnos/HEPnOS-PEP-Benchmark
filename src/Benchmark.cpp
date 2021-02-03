@@ -244,40 +244,44 @@ static void run_benchmark() {
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    spdlog::trace("Creating AsyncEngine with {} threads", g_num_threads);
-    hepnos::AsyncEngine async(datastore, g_num_threads);
+    {
 
-    spdlog::trace("Creating ParallelEventProcessor");
-    hepnos::ParallelEventProcessor pep(async, MPI_COMM_WORLD, g_pep_options);
+        spdlog::trace("Creating AsyncEngine with {} threads", g_num_threads);
+        hepnos::AsyncEngine async(datastore, g_num_threads);
 
-    spdlog::trace("Loading dataset");
-    hepnos::DataSet dataset;
-    try {
-        dataset = datastore.root()[g_input_dataset];
-    } catch(...) {}
-    if(!dataset.valid() && g_rank == 0) {
-        spdlog::critical("Invalid dataset {}", g_input_dataset);
-        MPI_Abort(MPI_COMM_WORLD, -1);
-        exit(-1);
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
+        spdlog::trace("Creating ParallelEventProcessor");
+        hepnos::ParallelEventProcessor pep(async, MPI_COMM_WORLD, g_pep_options);
 
-    spdlog::trace("Calling processing function on dataset {}", g_input_dataset);
+        spdlog::trace("Loading dataset");
+        hepnos::DataSet dataset;
+        try {
+            dataset = datastore.root()[g_input_dataset];
+        } catch(...) {}
+        if(!dataset.valid() && g_rank == 0) {
+            spdlog::critical("Invalid dataset {}", g_input_dataset);
+            MPI_Abort(MPI_COMM_WORLD, -1);
+            exit(-1);
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
 
-    hepnos::ParallelEventProcessorStatistics stats;
-    MPI_Barrier(MPI_COMM_WORLD);
-    double t_start = MPI_Wtime();
-    pep.process(dataset, [](const hepnos::Event& ev) {
-        auto subrun = ev.subrun();
-        auto run = subrun.run();
-        spdlog::trace("Processing event {} from subrun {} from run {}",
+        spdlog::trace("Calling processing function on dataset {}", g_input_dataset);
+
+        hepnos::ParallelEventProcessorStatistics stats;
+        MPI_Barrier(MPI_COMM_WORLD);
+        double t_start = MPI_Wtime();
+        pep.process(dataset, [](const hepnos::Event& ev) {
+            auto subrun = ev.subrun();
+            auto run = subrun.run();
+            spdlog::trace("Processing event {} from subrun {} from run {}",
                       ev.number(), subrun.number(), run.number());
-        simulate_processing(ev);
-    }, &stats);
-    MPI_Barrier(MPI_COMM_WORLD);
-    double t_end = MPI_Wtime();
+            simulate_processing(ev);
+        }, &stats);
+        MPI_Barrier(MPI_COMM_WORLD);
+        double t_end = MPI_Wtime();
 
-    spdlog::info("Statistics: {}", stats);
+        spdlog::info("Statistics: {}", stats);
+    }
+
     MPI_Barrier(MPI_COMM_WORLD);
     if(g_rank == 0)
         spdlog::info("Benchmark completed in {} seconds", t_end-t_start);
