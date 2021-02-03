@@ -235,6 +235,7 @@ static void simulate_processing(const hepnos::Event& ev) {
 
 static void run_benchmark() {
 
+    double t_start, t_end;
     hepnos::DataStore datastore;
     try {
         spdlog::trace("Connecting to HEPnOS using file {}", g_connection_file);
@@ -268,7 +269,7 @@ static void run_benchmark() {
 
         hepnos::ParallelEventProcessorStatistics stats;
         MPI_Barrier(MPI_COMM_WORLD);
-        double t_start = MPI_Wtime();
+        t_start = MPI_Wtime();
         pep.process(dataset, [](const hepnos::Event& ev) {
             auto subrun = ev.subrun();
             auto run = subrun.run();
@@ -277,7 +278,7 @@ static void run_benchmark() {
             simulate_processing(ev);
         }, &stats);
         MPI_Barrier(MPI_COMM_WORLD);
-        double t_end = MPI_Wtime();
+        t_end = MPI_Wtime();
 
         spdlog::info("Statistics: {}", stats);
     }
