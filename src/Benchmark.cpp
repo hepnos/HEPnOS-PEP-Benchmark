@@ -29,6 +29,7 @@ static std::unordered_map<
 static std::mt19937              g_mte;
 static hepnos::ParallelEventProcessorOptions
                                  g_pep_options;
+static bool                      g_disable_stats;
 
 static void parse_arguments(int argc, char** argv);
 static std::pair<double,double> parse_wait_range(const std::string&);
@@ -117,6 +118,8 @@ static void parse_arguments(int argc, char** argv) {
         TCLAP::ValueArg<unsigned> cacheSize("s", "cache-size",
             "Prefetcher cache size for parallel event processor", false,
             std::numeric_limits<unsigned>::max(), "int");
+        TCLAP::SwitchArg disableStats("", "disable-stats",
+            "Disable statistics collection");
 
         cmd.add(clientFile);
         cmd.add(dataSetName);
@@ -128,6 +131,7 @@ static void parse_arguments(int argc, char** argv) {
         cmd.add(inputBatchSize);
         cmd.add(outputBatchSize);
         cmd.add(cacheSize);
+        cmd.add(disableStats);
 
         cmd.parse(argc, argv);
 
@@ -141,6 +145,7 @@ static void parse_arguments(int argc, char** argv) {
         g_pep_options.inputBatchSize  = inputBatchSize.getValue();
         g_pep_options.outputBatchSize = outputBatchSize.getValue();
         g_pep_options.cacheSize       = cacheSize.getValue();
+        g_disable_stats               = disableStats.getValue();
 
     } catch(TCLAP::ArgException &e) {
         if(g_rank == 0) {
@@ -268,6 +273,10 @@ static void run_benchmark() {
         spdlog::trace("Calling processing function on dataset {}", g_input_dataset);
 
         hepnos::ParallelEventProcessorStatistics stats;
+        hepnos::ParallelEventProcessorStatistics* stats_ptr = &stats;
+        if(g_disable_stats)
+            stats_ptr = nullptr;
+
         MPI_Barrier(MPI_COMM_WORLD);
         t_start = MPI_Wtime();
         pep.process(dataset, [](const hepnos::Event& ev) {
@@ -276,11 +285,12 @@ static void run_benchmark() {
             spdlog::trace("Processing event {} from subrun {} from run {}",
                       ev.number(), subrun.number(), run.number());
             simulate_processing(ev);
-        }, &stats);
+        }, stats_ptr);
         MPI_Barrier(MPI_COMM_WORLD);
         t_end = MPI_Wtime();
 
-        spdlog::info("Statistics: {}", stats);
+        if(!g_disable_stats)
+            spdlog::info("Statistics: {}", stats);
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -296,7 +306,6 @@ static Ostream& operator<<(Ostream& os, const hepnos::ParallelEventProcessorStat
        << " \"acc_event_processing_time\" : " << stats.acc_event_processing_time << ","
        << " \"acc_product_loading_time\" : " << stats.acc_product_loading_time << ","
        << " \"processing_time_stats\" : " << stats.processing_time_stats << ","
-       << " \"product_loading_time_stats\" : " << stats.product_loading_time_stats << ","
        << " \"waiting_time_stats\" : " << stats.waiting_time_stats << "}";
     return os;
 }
