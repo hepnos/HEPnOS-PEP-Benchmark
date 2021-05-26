@@ -9,8 +9,13 @@
 #include <spdlog/fmt/ostr.h>
 #include <tclap/CmdLine.h>
 #include <hepnos.hpp>
+#ifdef ONLY_TEST_CLASSES
+#include "_test_.hpp"
+#include "_test_macro_.hpp"
+#else
 #include "hepnos-nova-classes/_all_.hpp"
 #include "hepnos-nova-classes/_macro_.hpp"
+#endif
 #include "DummyProduct.hpp"
 
 static int                       g_size;
@@ -21,11 +26,16 @@ static std::string               g_product_label;
 static spdlog::level::level_enum g_logging_level;
 static unsigned                  g_num_threads;
 static std::vector<std::string>  g_product_names;
+static bool                      g_preload_products;
 static std::pair<double,double>  g_wait_range;
 static std::unordered_map<
         std::string,
         std::function<void(const hepnos::Event&)>>
                                  g_load_product_fn;
+static std::unordered_map<
+        std::string,
+        std::function<void(hepnos::ParallelEventProcessor&)>>
+                                 g_preload_fn;
 static std::mt19937              g_mte;
 static hepnos::ParallelEventProcessorOptions
                                  g_pep_options;
@@ -35,6 +45,7 @@ static void parse_arguments(int argc, char** argv);
 static std::pair<double,double> parse_wait_range(const std::string&);
 static std::string check_file_exists(const std::string& filename);
 static void prepare_product_loading_functions();
+static void prepare_preloading_functions();
 static void run_benchmark();
 template<typename Ostream>
 static Ostream& operator<<(Ostream& os, const hepnos::ParallelEventProcessorStatistics& stats);
@@ -67,6 +78,9 @@ int main(int argc, char** argv) {
     spdlog::trace("wait range: {},{}", g_wait_range.first, g_wait_range.second);
 
     prepare_product_loading_functions();
+    if(g_preload_products) {
+        prepare_preloading_functions();
+    }
 
     if(g_rank == 0) {
         for(auto& p : g_product_names) {
@@ -118,6 +132,8 @@ static void parse_arguments(int argc, char** argv) {
         TCLAP::ValueArg<unsigned> cacheSize("s", "cache-size",
             "Prefetcher cache size for parallel event processor", false,
             std::numeric_limits<unsigned>::max(), "int");
+        TCLAP::SwitchArg preloadProducts("p", "preload",
+            "Enable preloading products");
         TCLAP::SwitchArg disableStats("", "disable-stats",
             "Disable statistics collection");
 
@@ -132,6 +148,7 @@ static void parse_arguments(int argc, char** argv) {
         cmd.add(outputBatchSize);
         cmd.add(cacheSize);
         cmd.add(disableStats);
+        cmd.add(preloadProducts);
 
         cmd.parse(argc, argv);
 
@@ -141,6 +158,7 @@ static void parse_arguments(int argc, char** argv) {
         g_logging_level     = spdlog::level::from_str(loggingLevel.getValue());
         g_num_threads       = numThreads.getValue();
         g_product_names     = productNames.getValue();
+        g_preload_products  = preloadProducts.getValue();
         g_wait_range        = parse_wait_range(waitRange.getValue());
         g_pep_options.inputBatchSize  = inputBatchSize.getValue();
         g_pep_options.outputBatchSize = outputBatchSize.getValue();
@@ -213,6 +231,20 @@ static void prepare_product_loading_functions() {
     spdlog::trace("Created functions for {} product types", g_load_product_fn.size());
 }
 
+static void prepare_preloading_functions() {
+    spdlog::trace("Preparing functions for loading producs");
+#define X(__class__) \
+    g_preload_fn[#__class__] = [](hepnos::ParallelEventProcessor& pep) { \
+        spdlog::trace("Setting preload for product of type " #__class__); \
+        pep.preload<__class__>(g_product_label); \
+    };
+
+    X(dummy_product)
+    HEPNOS_FOREACH_NOVA_CLASS
+#undef X
+    spdlog::trace("Created functions for {} product types", g_load_product_fn.size());
+}
+
 static void simulate_processing(const hepnos::Event& ev) {
     spdlog::trace("Loading products");
     try {
@@ -258,6 +290,12 @@ static void run_benchmark() {
         spdlog::trace("Creating ParallelEventProcessor");
         hepnos::ParallelEventProcessor pep(async, MPI_COMM_WORLD, g_pep_options);
 
+        if(g_preload_products) {
+            spdlog::trace("Setting preload flags");
+            for(auto& p : g_product_names) {
+                g_preload_fn[p](pep);
+            }
+        }
         spdlog::trace("Loading dataset");
         hepnos::DataSet dataset;
         try {
