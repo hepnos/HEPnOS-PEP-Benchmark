@@ -30,7 +30,7 @@ static bool                      g_preload_products;
 static std::pair<double,double>  g_wait_range;
 static std::unordered_map<
         std::string,
-        std::function<void(const hepnos::Event&)>>
+        std::function<void(const hepnos::Event&, const hepnos::ProductCache&)>>
                                  g_load_product_fn;
 static std::unordered_map<
         std::string,
@@ -219,10 +219,18 @@ static std::string check_file_exists(const std::string& filename) {
 static void prepare_product_loading_functions() {
     spdlog::trace("Preparing functions for loading producs");
 #define X(__class__) \
-    g_load_product_fn[#__class__] = [](const hepnos::Event& ev) { \
-        __class__ product; \
+    g_load_product_fn[#__class__] = [](const hepnos::Event& ev, const hepnos::ProductCache& cache) { \
+        std::vector<__class__> product; \
         spdlog::trace("Loading product of type " #__class__); \
-        ev.load(g_product_label, product); \
+        if(!g_preload_products) { \
+            if(!ev.load(g_product_label, product)) { \
+                spdlog::error("Could not load product of type " #__class__); \
+            } \
+        } else { \
+            if(!ev.load(cache, g_product_label, product)) { \
+                spdlog::error("Could not load product of type " #__class__ " from cache"); \
+            } \
+        } \
     };
 
     X(dummy_product)
@@ -236,7 +244,7 @@ static void prepare_preloading_functions() {
 #define X(__class__) \
     g_preload_fn[#__class__] = [](hepnos::ParallelEventProcessor& pep) { \
         spdlog::trace("Setting preload for product of type " #__class__); \
-        pep.preload<__class__>(g_product_label); \
+        pep.preload<std::vector<__class__>>(g_product_label); \
     };
 
     X(dummy_product)
@@ -245,11 +253,11 @@ static void prepare_preloading_functions() {
     spdlog::trace("Created functions for {} product types", g_load_product_fn.size());
 }
 
-static void simulate_processing(const hepnos::Event& ev) {
+static void simulate_processing(const hepnos::Event& ev, const hepnos::ProductCache& cache) {
     spdlog::trace("Loading products");
     try {
         for(auto& p : g_product_names) {
-            g_load_product_fn[p](ev);
+            g_load_product_fn[p](ev, cache);
         }
     } catch(const hepnos::Exception& ex) {
         spdlog::critical(ex.what());
@@ -317,12 +325,12 @@ static void run_benchmark() {
 
         MPI_Barrier(MPI_COMM_WORLD);
         t_start = MPI_Wtime();
-        pep.process(dataset, [](const hepnos::Event& ev) {
+        pep.process(dataset, [](const hepnos::Event& ev, const hepnos::ProductCache& cache) {
             auto subrun = ev.subrun();
             auto run = subrun.run();
             spdlog::trace("Processing event {} from subrun {} from run {}",
                       ev.number(), subrun.number(), run.number());
-            simulate_processing(ev);
+            simulate_processing(ev, cache);
         }, stats_ptr);
         MPI_Barrier(MPI_COMM_WORLD);
         t_end = MPI_Wtime();
