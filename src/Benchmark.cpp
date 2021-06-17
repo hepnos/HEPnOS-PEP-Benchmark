@@ -20,7 +20,9 @@
 
 static int                       g_size;
 static int                       g_rank;
+static std::string               g_protocol;
 static std::string               g_connection_file;
+static std::string               g_margo_file;
 static std::string               g_input_dataset;
 static std::string               g_product_label;
 static spdlog::level::level_enum g_logging_level;
@@ -106,6 +108,8 @@ static void parse_arguments(int argc, char** argv) {
     try {
         TCLAP::CmdLine cmd("Benchmark HEPnOS Parallel Event Processor", ' ', "0.1");
         // mandatory arguments
+        TCLAP::ValueArg<std::string> protocol("p", "protocol",
+            "Mercury protocol", true, "", "string");
         TCLAP::ValueArg<std::string> clientFile("c", "connection",
             "YAML connection file for HEPnOS", true, "", "string");
         TCLAP::ValueArg<std::string> dataSetName("d", "dataset",
@@ -113,6 +117,8 @@ static void parse_arguments(int argc, char** argv) {
         TCLAP::ValueArg<std::string> productLabel("l", "label",
             "Label to use when storing products", true, "", "string");
         // optional arguments
+        TCLAP::ValueArg<std::string> margoFile("m", "margo-config",
+            "Margo configuration file", false, "", "string");
         std::vector<std::string> allowed = {
             "trace", "debug", "info", "warning", "error", "critical", "off" };
         TCLAP::ValuesConstraint<std::string> allowedVals( allowed );
@@ -132,11 +138,13 @@ static void parse_arguments(int argc, char** argv) {
         TCLAP::ValueArg<unsigned> cacheSize("s", "cache-size",
             "Prefetcher cache size for parallel event processor", false,
             std::numeric_limits<unsigned>::max(), "int");
-        TCLAP::SwitchArg preloadProducts("p", "preload",
+        TCLAP::SwitchArg preloadProducts("", "preload",
             "Enable preloading products");
         TCLAP::SwitchArg disableStats("", "disable-stats",
             "Disable statistics collection");
 
+        cmd.add(protocol);
+        cmd.add(margoFile);
         cmd.add(clientFile);
         cmd.add(dataSetName);
         cmd.add(productLabel);
@@ -152,6 +160,8 @@ static void parse_arguments(int argc, char** argv) {
 
         cmd.parse(argc, argv);
 
+        g_protocol          = protocol.getValue();
+        g_margo_file        = margoFile.getValue();
         g_connection_file   = check_file_exists(clientFile.getValue());
         g_input_dataset     = dataSetName.getValue();
         g_product_label     = productLabel.getValue();
@@ -284,7 +294,7 @@ static void run_benchmark() {
     hepnos::DataStore datastore;
     try {
         spdlog::trace("Connecting to HEPnOS using file {}", g_connection_file);
-        datastore = hepnos::DataStore::connect(g_connection_file);
+        datastore = hepnos::DataStore::connect(g_protocol, g_connection_file, g_margo_file);
     } catch(const hepnos::Exception& ex) {
         spdlog::critical("Could not connect to HEPnOS service: {}", ex.what());
         MPI_Abort(MPI_COMM_WORLD, 1);
