@@ -23,6 +23,7 @@ static int                       g_rank;
 static std::string               g_protocol;
 static std::string               g_connection_file;
 static std::string               g_margo_file;
+static bool                      g_compare;
 static std::string               g_input_dataset;
 static std::string               g_product_label;
 static spdlog::level::level_enum g_logging_level;
@@ -142,6 +143,7 @@ static void parse_arguments(int argc, char** argv) {
             "Enable preloading products");
         TCLAP::SwitchArg disableStats("", "disable-stats",
             "Disable statistics collection");
+        TCLAP::SwitchArg compare("", "compare", "Compare with and without preloading");
 
         cmd.add(protocol);
         cmd.add(margoFile);
@@ -157,6 +159,7 @@ static void parse_arguments(int argc, char** argv) {
         cmd.add(cacheSize);
         cmd.add(disableStats);
         cmd.add(preloadProducts);
+        cmd.add(compare);
 
         cmd.parse(argc, argv);
 
@@ -174,6 +177,8 @@ static void parse_arguments(int argc, char** argv) {
         g_pep_options.outputBatchSize = outputBatchSize.getValue();
         g_pep_options.cacheSize       = cacheSize.getValue();
         g_disable_stats               = disableStats.getValue();
+        g_compare                     = compare.getValue();
+        if(g_compare) g_preload_products = true;
 
     } catch(TCLAP::ArgException &e) {
         if(g_rank == 0) {
@@ -232,13 +237,34 @@ static void prepare_product_loading_functions() {
     g_load_product_fn[#__class__] = [](const hepnos::Event& ev, const hepnos::ProductCache& cache) { \
         std::vector<__class__> product; \
         spdlog::trace("Loading product of type " #__class__); \
-        if(!g_preload_products) { \
+        if(!g_compare) { \
+            if(!g_preload_products) { \
+                if(!ev.load(g_product_label, product)) { \
+                    spdlog::error("Could not load product of type " #__class__); \
+                } \
+            } else { \
+                if(!ev.load(cache, g_product_label, product)) { \
+                    spdlog::error("Could not load product of type " #__class__ " from cache"); \
+                } \
+            } \
+        } else { \
+            decltype(product) preloaded_product; \
             if(!ev.load(g_product_label, product)) { \
                 spdlog::error("Could not load product of type " #__class__); \
             } \
-        } else { \
-            if(!ev.load(cache, g_product_label, product)) { \
+            if(!ev.load(cache, g_product_label, preloaded_product)) { \
                 spdlog::error("Could not load product of type " #__class__ " from cache"); \
+            } \
+            auto rn  = ev.subrun().run().number(); \
+            auto srn = ev.subrun().number(); \
+            auto evn = ev.number(); \
+            if(preloaded_product.size() != product.size()) { \
+                spdlog::error("[{},{},{}] product " #__class__ " size error ({} != {})", \
+                        rn, srn, evn, preloaded_product.size(), product.size()); \
+            } else { \
+                if(std::memcmp(preloaded_product.data(), product.data(), product.size()*sizeof(__class__)) != 0) { \
+                    spdlog::error("[{},{},{}] product " #__class__ " binary differs", rn, srn, evn); \
+                } \
             } \
         } \
     };
