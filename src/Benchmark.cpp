@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
 
 static void parse_arguments(int argc, char** argv) {
     try {
-        TCLAP::CmdLine cmd("Benchmark HEPnOS Parallel Event Processor", ' ', "0.1");
+        TCLAP::CmdLine cmd("Benchmark HEPnOS Parallel Event Processor", ' ', "0.5");
         // mandatory arguments
         TCLAP::ValueArg<std::string> protocol("p", "protocol",
             "Mercury protocol", true, "", "string");
