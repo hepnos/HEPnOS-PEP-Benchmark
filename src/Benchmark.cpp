@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
 
 static void parse_arguments(int argc, char** argv) {
     try {
-        TCLAP::CmdLine cmd("Benchmark HEPnOS Parallel Event Processor", ' ', "0.5");
+        TCLAP::CmdLine cmd("Benchmark HEPnOS Parallel Event Processor", ' ', "0.6");
         // mandatory arguments
         TCLAP::ValueArg<std::string> protocol("p", "protocol",
             "Mercury protocol", true, "", "string");
@@ -144,6 +144,7 @@ static void parse_arguments(int argc, char** argv) {
         TCLAP::SwitchArg disableStats("", "disable-stats",
             "Disable statistics collection");
         TCLAP::SwitchArg compare("", "compare", "Compare with and without preloading");
+        TCLAP::SwitchArg noRDMA("", "no-rdma", "Use RPC instead of RDMA for event sharing");
 
         cmd.add(protocol);
         cmd.add(margoFile);
@@ -160,6 +161,7 @@ static void parse_arguments(int argc, char** argv) {
         cmd.add(disableStats);
         cmd.add(preloadProducts);
         cmd.add(compare);
+        cmd.add(noRDMA);
 
         cmd.parse(argc, argv);
 
@@ -176,6 +178,7 @@ static void parse_arguments(int argc, char** argv) {
         g_pep_options.inputBatchSize  = inputBatchSize.getValue();
         g_pep_options.outputBatchSize = outputBatchSize.getValue();
         g_pep_options.cacheSize       = cacheSize.getValue();
+        g_pep_options.use_rdma        = !noRDMA.getValue();
         g_disable_stats               = disableStats.getValue();
         g_compare                     = compare.getValue();
         if(g_compare) g_preload_products = true;
